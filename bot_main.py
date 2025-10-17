@@ -10,31 +10,30 @@ app = Flask(__name__)
 
 # === Устанавливаем webhook ===
 def set_webhook():
+    webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
     bot.remove_webhook()
-    bot.set_webhook(url=f"{RENDER_EXTERNAL_URL}/{BOT_TOKEN}")
+    success = bot.set_webhook(url=webhook_url)
+    print(f"🔗 Webhook set: {success} ({webhook_url})")
 
-@app.before_request
-def before_request():
-    if not hasattr(app, 'webhook_set'):
-        set_webhook()
-        app.webhook_set = True
-
-# === Главный маршрут (проверка работы) ===
+# === Проверка сервера ===
 @app.route('/')
 def index():
-    return "Бот запущен и слушает Telegram!"
+    return "✅ Бот запущен и слушает Telegram!"
 
-# === Обработка сообщений от Telegram ===
-@app.route(f'/{BOT_TOKEN}', methods=['POST'])
+# === Маршрут для Telegram webhook ===
+@app.route('/webhook', methods=['POST'])
 def webhook():
     json_str = request.get_data().decode('utf-8')
     update = telebot.types.Update.de_json(json_str)
     bot.process_new_updates([update])
     return "OK", 200
 
+# === Команда /start ===
 @bot.message_handler(commands=['start'])
 def start_message(message):
-    bot.send_message(message.chat.id, "✅ Бот успешно запущен и готов к работе!")
+    bot.send_message(message.chat.id, "Привет! 👋 Бот успешно запущен и готов к работе.")
 
+# === Точка входа ===
 if __name__ == '__main__':
+    set_webhook()  # <-- Устанавливаем сразу при запуске
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
