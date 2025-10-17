@@ -1,82 +1,39 @@
-# bot_main.py
 import os
+from flask import Flask, request
 import telebot
-from flask import Flask, request, abort
 
-# Читаем токен и публичный URL сервиса из переменных окружения
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-SERVICE_URL = os.getenv("SERVICE_URL")  # например: https://opi-bot.onrender.com
-
-if not BOT_TOKEN:
-    raise RuntimeError("Error: BOT_TOKEN is not set in environment variables")
+# === Настройки ===
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+WEBHOOK_URL = f"https://opi-bot-1.onrender.com/{BOT_TOKEN}"
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# --- Примеры команд ---
+# === Обработчик команды /start ===
 @bot.message_handler(commands=['start'])
-def start_cmd(message):
-    bot.reply_to(message, "Привет! Я бот ОПИ. Используй /help")
+def send_welcome(message):
+    bot.reply_to(message, "Привет! 🤖 Бот успешно подключен к серверу и готов к работе.")
 
-@bot.message_handler(commands=['help'])
-def help_cmd(message):
-    bot.reply_to(message, "Команды:\n/обновить [месторождение] [номер] [статус]\n"
-                          "/коммент [месторождение] [номер] [заметка]\n"
-                          "/статус [месторождение] [номер]\n"
-                          "/все\n/отчет")
+# === Обработчик всех остальных сообщений ===
+@bot.message_handler(func=lambda message: True)
+def echo_all(message):
+    bot.reply_to(message, f"Ты написал: {message.text}")
 
-# Здесь должна быть логика обработки команд (взятая из твоего предыдущего кода)
-# Для краткости приведём упрощённый пример, вставь свою логику чтения/записи Excel:
-import pandas as pd
-FILE_NAME = "opi_status.xlsx"
-if not os.path.exists(FILE_NAME):
-    pd.DataFrame(columns=["Месторождение","Скважина","Статус","Комментарий","Автор","Дата обновления"]).to_excel(FILE_NAME, index=False)
+# === Flask роут для Telegram webhook ===
+@app.route(f'/{BOT_TOKEN}', methods=['POST'])
+def webhook():
+    json_str = request.get_data(as_text=True)
+    update = telebot.types.Update.de_json(json_str)
+    bot.process_new_updates([update])
+    return "!", 200
 
-@bot.message_handler(commands=['все'])
-def cmd_all(message):
-    df = pd.read_excel(FILE_NAME)
-    if df.empty:
-        bot.reply_to(message, "Нет активных скважин.")
-        return
-    s = "Текущие статусы:\n"
-    for _, row in df.iterrows():
-        s += f"{row['Месторождение']} – {row['Скважина']}: {row['Статус']} ({row['Автор']}, {row['Дата обновления']})\n"
-    bot.send_message(message.chat.id, s)
-
-# --- Webhook endpoints ---
-# Telegram будет POST-ить JSON на /<BOT_TOKEN>
-@app.route("/" + BOT_TOKEN, methods=['POST'])
-def webhook_handler():
-    if request.headers.get('content-type') == 'application/json':
-        json_str = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_str)
-        bot.process_new_updates([update])
-        return "", 200
-    else:
-        abort(403)
-
-@app.route("/", methods=['GET'])
+@app.route('/', methods=['GET'])
 def index():
-    return "OPI bot is running."
+    return "OPI Bot is alive!", 200
 
-def set_webhook():
-    """Устанавливает webhook (вызвать при старте только если SERVICE_URL задан)"""
-    if not SERVICE_URL:
-        print("SERVICE_URL not set — webhook not configured automatically.")
-        return
-    webhook_url = SERVICE_URL.rstrip("/") + "/" + BOT_TOKEN
-    print("Setting webhook to:", webhook_url)
-    try:
-        # Удалим старый webhook и установим новый
-        bot.remove_webhook()
-        ok = bot.set_webhook(url=webhook_url)
-        print("set_webhook returned:", ok)
-    except Exception as e:
-        print("Error setting webhook:", e)
-
-# Запускаем приложение
-if __name__ == "__main__":
-    # Сначала попытаемся установить webhook (если SERVICE_URL задан)
-    set_webhook()
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+# === Установка webhook ===
+if __name__ == '__main__':
+    bot.remove_webhook()
+    bot.set_webhook(url=WEBHOOK_URL)
+    print(f"Webhook установлен: {WEBHOOK_URL}")
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
