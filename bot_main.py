@@ -10,17 +10,26 @@ app = Flask(__name__)
 
 # === Устанавливаем webhook ===
 def set_webhook():
+    if not BOT_TOKEN or not RENDER_EXTERNAL_URL:
+        print("❌ BOT_TOKEN или RENDER_EXTERNAL_URL не заданы!")
+        return
     webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
     bot.remove_webhook()
     success = bot.set_webhook(url=webhook_url)
     print(f"🔗 Webhook set: {success} ({webhook_url})")
 
-# === Проверка сервера ===
+# === Устанавливаем webhook при запуске Flask ===
+@app.before_serving
+def before_serving():
+    print("🚀 Flask app starting, setting webhook...")
+    set_webhook()
+
+# === Проверка работы ===
 @app.route('/')
 def index():
     return "✅ Бот запущен и слушает Telegram!"
 
-# === Маршрут для Telegram webhook ===
+# === Webhook endpoint ===
 @app.route('/webhook', methods=['POST'])
 def webhook():
     json_str = request.get_data().decode('utf-8')
@@ -33,7 +42,6 @@ def webhook():
 def start_message(message):
     bot.send_message(message.chat.id, "Привет! 👋 Бот успешно запущен и готов к работе.")
 
-# === Точка входа ===
 if __name__ == '__main__':
-    set_webhook()  # <-- Устанавливаем сразу при запуске
+    print("🚀 Starting bot server...")
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
