@@ -31,11 +31,11 @@ def index():
     return "OPI Bot is alive!", 200
 
 # === Установка webhook при запуске ===
-@app.before_first_request
-def before_first_request():
-    bot.remove_webhook()
-    bot.set_webhook(url=WEBHOOK_URL)
-    print(f"Webhook установлен: {WEBHOOK_URL}")
+@app.before_request
+def before_request():
+    if not hasattr(app, 'webhook_set'):
+        set_webhook()
+        app.webhook_set = True
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
