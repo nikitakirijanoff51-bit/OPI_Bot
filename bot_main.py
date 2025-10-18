@@ -13,10 +13,10 @@ def set_webhook():
     if not BOT_TOKEN or not RENDER_EXTERNAL_URL:
         print("❌ BOT_TOKEN или RENDER_EXTERNAL_URL не заданы!")
         return
-    webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
+    webhook_url = f"{RENDER_EXTERNAL_URL}/{BOT_TOKEN}"
     bot.remove_webhook()
     success = bot.set_webhook(url=webhook_url)
-    print(f"🔗 Webhook set: {success} ({webhook_url})")
+    print(f"🔗 Webhook установлен: {success} ({webhook_url})")
 
 # === Проверка, выставлен ли вебхук ===
 webhook_set = False
@@ -25,7 +25,7 @@ webhook_set = False
 def before_request():
     global webhook_set
     if not webhook_set:
-        print("🚀 Первичная инициализация, ставим webhook...")
+        print("🚀 Первичная инициализация — ставим webhook...")
         set_webhook()
         webhook_set = True
 
@@ -35,7 +35,7 @@ def index():
     return "✅ Бот запущен и слушает Telegram!"
 
 # === Обработка обновлений Telegram ===
-@app.route('/webhook', methods=['POST'])
+@app.route(f'/{BOT_TOKEN}', methods=['POST'])
 def webhook():
     json_str = request.get_data().decode('utf-8')
     update = telebot.types.Update.de_json(json_str)
