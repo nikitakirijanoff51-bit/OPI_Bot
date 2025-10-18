@@ -25,7 +25,7 @@ webhook_set = False
 def before_request():
     global webhook_set
     if not webhook_set:
-        print("🚀 Первичная инициализация — ставим webhook...")
+        print("🚀 Первичная инициализация, ставим webhook...")
         set_webhook()
         webhook_set = True
 
