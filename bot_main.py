@@ -18,18 +18,23 @@ def set_webhook():
     success = bot.set_webhook(url=webhook_url)
     print(f"🔗 Webhook set: {success} ({webhook_url})")
 
-# === Устанавливаем webhook при запуске Flask ===
-@app.before_serving
-def before_serving():
-    print("🚀 Flask app starting, setting webhook...")
-    set_webhook()
+# === Проверка, выставлен ли вебхук ===
+webhook_set = False
+
+@app.before_request
+def before_request():
+    global webhook_set
+    if not webhook_set:
+        print("🚀 Первичная инициализация, ставим webhook...")
+        set_webhook()
+        webhook_set = True
 
 # === Проверка работы ===
 @app.route('/')
 def index():
     return "✅ Бот запущен и слушает Telegram!"
 
-# === Webhook endpoint ===
+# === Обработка обновлений Telegram ===
 @app.route('/webhook', methods=['POST'])
 def webhook():
     json_str = request.get_data().decode('utf-8')
