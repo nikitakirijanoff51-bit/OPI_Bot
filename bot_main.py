@@ -18,9 +18,7 @@ def set_webhook():
     success = bot.set_webhook(url=webhook_url)
     print(f"🔗 Webhook set: {success} ({webhook_url})")
 
-# === Проверка, выставлен ли вебхук ===
-webhook_set = False
-
+# === Первичная установка webhook при старте ===
 @app.before_request
 def before_request():
     global webhook_set
@@ -37,16 +35,24 @@ def index():
 # === Обработка обновлений Telegram ===
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    json_str = request.get_data().decode('utf-8')
-    update = telebot.types.Update.de_json(json_str)
-    bot.process_new_updates([update])
+    try:
+        json_str = request.get_data(as_text=True)
+        print("📩 Получено обновление от Telegram:", json_str)  # <-- добавлено для отладки
+        update = telebot.types.Update.de_json(json_str)
+        bot.process_new_updates([update])
+    except Exception as e:
+        print("❌ Ошибка при обработке webhook:", e)
     return "OK", 200
 
 # === Команда /start ===
 @bot.message_handler(commands=['start'])
 def start_message(message):
+    print(f"👤 Пользователь {message.from_user.id} запустил /start")  # <-- лог
     bot.send_message(message.chat.id, "Привет! 👋 Бот успешно запущен и готов к работе.")
+
+# === Переменная-флаг для webhook ===
+webhook_set = False
 
 if __name__ == '__main__':
     print("🚀 Starting bot server...")
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
