@@ -1,6 +1,7 @@
 import os
 import telebot
 from flask import Flask, request
+import threading
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
@@ -43,7 +44,17 @@ def webhook():
 @bot.message_handler(commands=['start'])
 def start_message(message):
     print(f"➡️ Получена команда /start от пользователя {message.from_user.id}")
-    bot.reply_to(message, "Привет 👋! Бот успешно запущен и готов к работе.")
+    try:
+        bot.send_message(message.chat.id, "Привет 👋! Бот успешно запущен и готов к работе.")
+    except Exception as e:
+        print(f"⚠️ Ошибка при отправке сообщения: {e}")
+
+# === Отдельный поток для стабильной работы с Telegram ===
+def run_bot():
+    print("🧵 Запуск потока обработки сообщений...")
+    bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=30)
+
+threading.Thread(target=run_bot, daemon=True).start()
 
 # === Запуск Flask ===
 if __name__ == '__main__':
