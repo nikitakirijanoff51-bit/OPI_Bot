@@ -1,69 +1,58 @@
 import os
-from flask import Flask, request
 import telebot
-
-app = Flask(__name__)
+from flask import Flask, request
+import threading
+import time
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
 
-# === Инициализация бота после Flask ===
-bot = telebot.TeleBot(BOT_TOKEN)
-webhook_set = False
+app = Flask(__name__)
+bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
 
+WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}/webhook"
 
-# === Устанавливаем webhook ===
-def set_webhook():
-    global webhook_set
-    if not BOT_TOKEN or not RENDER_EXTERNAL_URL:
-        print("❌ BOT_TOKEN или RENDER_EXTERNAL_URL не заданы!")
-        return
-    webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
+# === Установка вебхука при старте ===
+@app.before_first_request
+def setup():
+    print("🚀 Настройка webhook...")
     bot.remove_webhook()
-    success = bot.set_webhook(url=webhook_url)
-    print(f"🔗 Webhook set: {success} ({webhook_url})")
-    webhook_set = True
+    time.sleep(1)
+    success = bot.set_webhook(url=WEBHOOK_URL)
+    print(f"🔗 Webhook установлен: {success} ({WEBHOOK_URL})")
 
 
-@app.before_request
-def before_request():
-    global webhook_set
-    if not webhook_set:
-        print("🚀 Первичная инициализация, ставим webhook...")
-        set_webhook()
-
-
-# === Проверка доступности сервера ===
 @app.route('/')
 def index():
-    return "✅ Бот запущен и слушает Telegram!"
+    return "✅ Бот работает на Render!"
 
 
-# === Обработка запросов Telegram ===
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         json_str = request.get_data(as_text=True)
         print("📩 Получено обновление от Telegram:", json_str)
-
         update = telebot.types.Update.de_json(json_str)
-
-        if update.message:  # <-- Явная обработка
-            bot.process_new_messages([update.message])
-
+        bot.process_new_updates([update])
     except Exception as e:
         print("❌ Ошибка при обработке webhook:", e)
-
     return "OK", 200
 
 
-# === Обработка команды /start ===
 @bot.message_handler(commands=['start'])
-def start_message(message):
+def handle_start(message):
     print(f"👤 Пользователь {message.from_user.id} запустил /start")
-    bot.send_message(message.chat.id, "Привет! 👋 Бот успешно запущен и готов к работе.")
+    bot.send_message(message.chat.id, "Привет! 👋 Я живой и работаю на Render!")
+
+
+# === Keep-alive поток, чтобы Render не убивал контейнер ===
+def keep_alive():
+    while True:
+        print("💓 Keep-alive ping...")
+        time.sleep(120)  # каждые 2 минуты
 
 
 if __name__ == '__main__':
-    print("🚀 Starting bot server...")
+    threading.Thread(target=keep_alive, daemon=True).start()
+    print("🚀 Flask сервер запущен...")
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
