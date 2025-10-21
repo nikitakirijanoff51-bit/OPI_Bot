@@ -1,86 +1,127 @@
 import os
 import telebot
+from telebot import types
 from flask import Flask, request
 import pandas as pd
 
 # === Настройки ===
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("SERVICE_URL")
+EXCEL_FILE = "data.xlsx"
 
-bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
+bot = telebot.TeleBot(BOT_TOKEN)
 
-DATA_FILE = "data.xlsx"
+# === Подготовка Excel-файла ===
+def init_excel():
+    if not os.path.exists(EXCEL_FILE):
+        df = pd.DataFrame(columns=["Месторождение", "#Скважины", "Статус", "Комментарий"])
+        df.to_excel(EXCEL_FILE, index=False)
+        print("📘 Создан новый файл data.xlsx")
+    else:
+        print("📗 Файл Excel найден")
 
-# === Инициализация Excel ===
-if not os.path.exists(DATA_FILE):
-    df = pd.DataFrame(columns=["Месторождение", "№ Скважины", "Статус", "Комментарий"])
-    df.to_excel(DATA_FILE, index=False)
+init_excel()
+
+# === Flask Webhook ===
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    try:
+        json_data = request.get_json(force=True)
+        if not json_data:
+            print("⚠️ Пустой JSON от Telegram")
+            return "no data", 400
+
+        print(f"📩 Получено обновление (raw): {json_data}")
+        update = telebot.types.Update.de_json(json_data)
+        bot.process_new_updates([update])
+        print("✅ Обновление успешно обработано")
+
+    except Exception as e:
+        print(f"❌ Ошибка обработки обновления: {e}")
+
+    return "OK", 200
 
 # === Команда /start ===
-@bot.message_handler(commands=['start'])
-def start_message(message):
-    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("📋 Посмотреть таблицу", "➕ Добавить запись")
-    bot.send_message(
-        message.chat.id,
-        "👋 Привет! Я бот для работы с таблицей.\nВыбери действие:",
-        reply_markup=markup
-    )
+@bot.message_handler(commands=["start"])
+def start(message):
+    print(f"➡️ Получена команда /start от пользователя {message.chat.id}")
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("📊 Посмотреть таблицу", "➕ Добавить запись", "✏️ Изменить запись")
+    bot.send_message(message.chat.id, "Привет! Выберите действие:", reply_markup=markup)
 
-# === Ответ на кнопки ===
-@bot.message_handler(func=lambda msg: msg.text == "📋 Посмотреть таблицу")
+# === Показать таблицу ===
+@bot.message_handler(func=lambda msg: msg.text == "📊 Посмотреть таблицу")
 def show_table(message):
-    df = pd.read_excel(DATA_FILE)
-    if df.empty:
-        bot.send_message(message.chat.id, "Таблица пока пустая 🗒️")
-    else:
-        text = "\n\n".join([f"{row['Месторождение']} | {row['№ Скважины']} | {row['Статус']} | {row['Комментарий']}"
-                            for _, row in df.iterrows()])
-        bot.send_message(message.chat.id, f"📊 Таблица:\n\n{text}")
+    try:
+        df = pd.read_excel(EXCEL_FILE)
+        if df.empty:
+            bot.send_message(message.chat.id, "Таблица пока пуста.")
+            return
+        text = "\n\n".join([f"🏭 {r['Месторождение']}\n🔩 {r['#Скважины']}\n📋 {r['Статус']}\n💬 {r['Комментарий']}" for _, r in df.iterrows()])
+        bot.send_message(message.chat.id, f"📄 Таблица:\n\n{text}")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Ошибка при чтении файла: {e}")
 
+# === Добавить запись ===
 @bot.message_handler(func=lambda msg: msg.text == "➕ Добавить запись")
 def add_entry(message):
-    bot.send_message(message.chat.id, "✏️ Введи данные в формате:\n\nМесторождение; № Скважины; Статус; Комментарий")
+    bot.send_message(message.chat.id, "Введите данные в формате:\nМесторождение; #Скважины; Статус; Комментарий")
     bot.register_next_step_handler(message, save_entry)
 
 def save_entry(message):
     try:
-        parts = [p.strip() for p in message.text.split(";")]
-        if len(parts) != 4:
-            raise ValueError
-        df = pd.read_excel(DATA_FILE)
-        new_row = pd.DataFrame([{
-            "Месторождение": parts[0],
-            "№ Скважины": parts[1],
-            "Статус": parts[2],
-            "Комментарий": parts[3]
-        }])
-        df = pd.concat([df, new_row], ignore_index=True)
-        df.to_excel(DATA_FILE, index=False)
-        bot.send_message(message.chat.id, "✅ Запись добавлена в таблицу.")
-    except Exception:
-        bot.send_message(message.chat.id, "⚠️ Неверный формат. Попробуй снова — через ;")
-
-# === Flask webhook ===
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    try:
-        json_str = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_str)
-        bot.process_new_updates([update])
+        data = [x.strip() for x in message.text.split(";")]
+        if len(data) != 4:
+            bot.send_message(message.chat.id, "Ошибка формата. Используй 4 значения через `;`.")
+            return
+        df = pd.read_excel(EXCEL_FILE)
+        new_row = {"Месторождение": data[0], "#Скважины": data[1], "Статус": data[2], "Комментарий": data[3]}
+        df.loc[len(df)] = new_row
+        df.to_excel(EXCEL_FILE, index=False)
+        bot.send_message(message.chat.id, "✅ Запись добавлена!")
     except Exception as e:
-        print(f"❌ Ошибка обработки обновления: {e}")
-    return "OK", 200
+        bot.send_message(message.chat.id, f"Ошибка: {e}")
 
-@app.route('/')
+# === Изменить запись ===
+@bot.message_handler(func=lambda msg: msg.text == "✏️ Изменить запись")
+def edit_entry(message):
+    bot.send_message(message.chat.id, "Введите номер строки и новые данные:\nНомер; Месторождение; #Скважины; Статус; Комментарий")
+    bot.register_next_step_handler(message, update_entry)
+
+def update_entry(message):
+    try:
+        data = [x.strip() for x in message.text.split(";")]
+        if len(data) != 5:
+            bot.send_message(message.chat.id, "Ошибка формата. Используй 5 значений через `;`.")
+            return
+        idx = int(data[0]) - 1
+        df = pd.read_excel(EXCEL_FILE)
+        if idx < 0 or idx >= len(df):
+            bot.send_message(message.chat.id, "Неверный номер строки.")
+            return
+        df.iloc[idx] = {"Месторождение": data[1], "#Скважины": data[2], "Статус": data[3], "Комментарий": data[4]}
+        df.to_excel(EXCEL_FILE, index=False)
+        bot.send_message(message.chat.id, "✏️ Запись обновлена!")
+    except Exception as e:
+        bot.send_message(message.chat.id, f"Ошибка: {e}")
+
+# === Главная страница (Render Ping) ===
+@app.route("/", methods=["GET"])
 def index():
-    return "✅ Бот запущен и слушает Telegram!"
+    return "Бот работает 🟢", 200
 
-# === Запуск ===
-if __name__ == '__main__':
-    print("🚀 Настройка webhook...")
-    bot.remove_webhook()
-    bot.set_webhook(url=f"{RENDER_EXTERNAL_URL}/webhook")
-    print(f"🔗 Webhook установлен: {RENDER_EXTERNAL_URL}/webhook")
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+# === Настройка webhook ===
+def setup_webhook():
+    if RENDER_URL and BOT_TOKEN:
+        webhook_url = f"{RENDER_URL}/webhook"
+        bot.remove_webhook()
+        bot.set_webhook(url=webhook_url)
+        print(f"🔗 Webhook установлен: {webhook_url}")
+    else:
+        print("⚠️ Ошибка: переменные окружения не заданы")
+
+if __name__ == "__main__":
+    setup_webhook()
+    port = int(os.getenv("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
