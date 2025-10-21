@@ -1,145 +1,99 @@
 import os
 import telebot
-from telebot import types
 from flask import Flask, request
 import pandas as pd
 
-# === Настройки ===
+# === Переменные окружения ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-RENDER_URL = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("SERVICE_URL")
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
+
+bot = telebot.TeleBot(BOT_TOKEN)
+app = Flask(__name__)
+
+# === Excel файл ===
 EXCEL_FILE = "data.xlsx"
 
-app = Flask(__name__)
-bot = telebot.TeleBot(BOT_TOKEN)
+# Если файла нет — создаём с нужными колонками
+if not os.path.exists(EXCEL_FILE):
+    df = pd.DataFrame(columns=["Месторождение", "#Скважины", "Статус выполнения", "Комментарий"])
+    df.to_excel(EXCEL_FILE, index=False)
+    print("📘 Создан новый файл data.xlsx")
 
-# === Подготовка Excel-файла ===
-def init_excel():
-    if not os.path.exists(EXCEL_FILE):
-        df = pd.DataFrame(columns=["Месторождение", "#Скважины", "Статус", "Комментарий"])
-        df.to_excel(EXCEL_FILE, index=False)
-        print("📘 Создан новый файл data.xlsx")
-    else:
-        print("📗 Файл Excel найден")
-
-init_excel()
-
-# === Flask Webhook ===
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    try:
-        json_data = request.get_json(force=True)
-        if not json_data:
-            print("⚠️ Пустой JSON от Telegram")
-            return "no data", 400
-
-        print(f"📩 Получено обновление (raw): {json_data}")
-        update = telebot.types.Update.de_json(json_data)
-        bot.process_new_updates([update])
-        print("✅ Обновление успешно обработано")
-
-    except Exception as e:
-        print(f"❌ Ошибка обработки обновления: {e}")
-
-    return "OK", 200
-
-# === Команда /start ===
+# === /start ===
 @bot.message_handler(commands=["start"])
-def start(message):
-    print(f"➡️ Получена команда /start от пользователя {message.chat.id}")
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add("📊 Посмотреть таблицу", "➕ Добавить запись", "✏️ Изменить запись")
-    bot.send_message(message.chat.id, "Привет! Выберите действие:", reply_markup=markup)
+def start_handler(message):
+    chat_id = message.chat.id
+    bot.send_message(
+        chat_id,
+        "👋 Привет! Я бот для учёта статусов скважин.\n\n"
+        "Ты можешь добавить данные или посмотреть таблицу.",
+    )
 
-# === Показать таблицу ===
-@bot.message_handler(func=lambda msg: msg.text == "📊 Посмотреть таблицу")
-def show_table(message):
+# === Добавление строки ===
+@bot.message_handler(commands=["add"])
+def add_handler(message):
+    chat_id = message.chat.id
+    try:
+        parts = message.text.split(" ", 4)
+        if len(parts) < 5:
+            bot.send_message(chat_id, "⚠️ Формат: /add месторождение скважина статус комментарий")
+            return
+
+        _, mest, well, status, comment = parts
+        df = pd.read_excel(EXCEL_FILE)
+        df.loc[len(df)] = [mest, well, status, comment]
+        df.to_excel(EXCEL_FILE, index=False)
+        bot.send_message(chat_id, "✅ Запись добавлена в таблицу!")
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Ошибка: {e}")
+
+# === Просмотр таблицы ===
+@bot.message_handler(commands=["show"])
+def show_handler(message):
+    chat_id = message.chat.id
     try:
         df = pd.read_excel(EXCEL_FILE)
         if df.empty:
-            bot.send_message(message.chat.id, "Таблица пока пуста.")
-            return
-        text = "\n\n".join([f"🏭 {r['Месторождение']}\n🔩 {r['#Скважины']}\n📋 {r['Статус']}\n💬 {r['Комментарий']}" for _, r in df.iterrows()])
-        bot.send_message(message.chat.id, f"📄 Таблица:\n\n{text}")
+            bot.send_message(chat_id, "Таблица пуста.")
+        else:
+            text = ""
+            for _, row in df.iterrows():
+                text += f"🏭 {row['Месторождение']} | ⛽ {row['#Скважины']} | 📊 {row['Статус выполнения']} | 💬 {row['Комментарий']}\n"
+            bot.send_message(chat_id, text[:4000])
     except Exception as e:
-        bot.send_message(message.chat.id, f"Ошибка при чтении файла: {e}")
+        bot.send_message(chat_id, f"❌ Ошибка при чтении файла: {e}")
 
-# === Добавить запись ===
-@bot.message_handler(func=lambda msg: msg.text == "➕ Добавить запись")
-def add_entry(message):
-    bot.send_message(message.chat.id, "Введите данные в формате:\nМесторождение; #Скважины; Статус; Комментарий")
-    bot.register_next_step_handler(message, save_entry)
-
-def save_entry(message):
-    try:
-        data = [x.strip() for x in message.text.split(";")]
-        if len(data) != 4:
-            bot.send_message(message.chat.id, "Ошибка формата. Используй 4 значения через `;`.")
-            return
-        df = pd.read_excel(EXCEL_FILE)
-        new_row = {"Месторождение": data[0], "#Скважины": data[1], "Статус": data[2], "Комментарий": data[3]}
-        df.loc[len(df)] = new_row
-        df.to_excel(EXCEL_FILE, index=False)
-        bot.send_message(message.chat.id, "✅ Запись добавлена!")
-    except Exception as e:
-        bot.send_message(message.chat.id, f"Ошибка: {e}")
-
-# === Изменить запись ===
-@bot.message_handler(func=lambda msg: msg.text == "✏️ Изменить запись")
-def edit_entry(message):
-    bot.send_message(message.chat.id, "Введите номер строки и новые данные:\nНомер; Месторождение; #Скважины; Статус; Комментарий")
-    bot.register_next_step_handler(message, update_entry)
-
-def update_entry(message):
-    try:
-        data = [x.strip() for x in message.text.split(";")]
-        if len(data) != 5:
-            bot.send_message(message.chat.id, "Ошибка формата. Используй 5 значений через `;`.")
-            return
-        idx = int(data[0]) - 1
-        df = pd.read_excel(EXCEL_FILE)
-        if idx < 0 or idx >= len(df):
-            bot.send_message(message.chat.id, "Неверный номер строки.")
-            return
-        df.iloc[idx] = {"Месторождение": data[1], "#Скважины": data[2], "Статус": data[3], "Комментарий": data[4]}
-        df.to_excel(EXCEL_FILE, index=False)
-        bot.send_message(message.chat.id, "✏️ Запись обновлена!")
-    except Exception as e:
-        bot.send_message(message.chat.id, f"Ошибка: {e}")
-
-# === Главная страница (Render Ping) ===
-@app.route("/", methods=["GET"])
-def index():
-    return "Бот работает 🟢", 200
-
-# === Настройка webhook ===
+# === Установка webhook ===
 def setup_webhook():
-    if RENDER_URL and BOT_TOKEN:
-        webhook_url = f"{RENDER_URL}/webhook"
-        bot.remove_webhook()
-        bot.set_webhook(url=webhook_url)
-        print(f"🔗 Webhook установлен: {webhook_url}")
-    else:
-        print("⚠️ Ошибка: переменные окружения не заданы")
+    if not BOT_TOKEN or not RENDER_EXTERNAL_URL:
+        print("❌ BOT_TOKEN или RENDER_EXTERNAL_URL не заданы!")
+        return False
+    bot.remove_webhook()
+    webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
+    result = bot.set_webhook(url=webhook_url)
+    print(f"🔗 Webhook установлен: {result} ({webhook_url})")
+    return result
 
-import threading
-import time
+# === Главная страница ===
+@app.route("/")
+def index():
+    return "✅ Бот запущен и слушает Telegram!"
 
-def run_flask():
-    port = int(os.getenv("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+# === Обработка webhook ===
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    try:
+        json_str = request.get_data().decode("utf-8")
+        update = telebot.types.Update.de_json(json_str)
+        print(f"📩 Получено обновление (raw): {update}")
+        bot.process_new_updates([update])  # 👈 теперь Telebot точно обрабатывает
+        print("✅ Обновление успешно обработано")
+    except Exception as e:
+        print(f"❌ Ошибка при обработке webhook: {e}")
+    return "OK", 200
 
+# === Запуск приложения ===
 if __name__ == "__main__":
     setup_webhook()
-    print("🚀 Запуск Flask + TeleBot...")
-
-    # Отдельный поток для Flask
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.start()
-
-    # Основной цикл для Telebot — чтобы активировать обработчики
-    while True:
-        try:
-            bot.infinity_polling(timeout=60, long_polling_timeout=5)
-        except Exception as e:
-            print(f"⚠️ Ошибка в polling цикле: {e}")
-            time.sleep(5)
+    port = int(os.getenv("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
