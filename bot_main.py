@@ -121,7 +121,25 @@ def setup_webhook():
     else:
         print("⚠️ Ошибка: переменные окружения не заданы")
 
-if __name__ == "__main__":
-    setup_webhook()
+import threading
+import time
+
+def run_flask():
     port = int(os.getenv("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
+if __name__ == "__main__":
+    setup_webhook()
+    print("🚀 Запуск Flask + TeleBot...")
+
+    # Отдельный поток для Flask
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.start()
+
+    # Основной цикл для Telebot — чтобы активировать обработчики
+    while True:
+        try:
+            bot.infinity_polling(timeout=60, long_polling_timeout=5)
+        except Exception as e:
+            print(f"⚠️ Ошибка в polling цикле: {e}")
+            time.sleep(5)
