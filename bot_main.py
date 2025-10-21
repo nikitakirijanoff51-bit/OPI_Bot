@@ -1,5 +1,4 @@
 import os
-import threading
 import telebot
 from flask import Flask, request
 import pandas as pd
@@ -59,18 +58,7 @@ def show_handler(message):
     except Exception as e:
         bot.send_message(message.chat.id, f"❌ Ошибка при чтении: {e}")
 
-# === Запуск Telebot в отдельном потоке ===
-def start_bot():
-    print("🤖 Поток Telebot запущен и готов принимать команды")
-    bot.infinity_polling(skip_pending=True)
-
-threading.Thread(target=start_bot, daemon=True).start()
-
-# === Flask endpoints ===
-@app.route("/")
-def index():
-    return "✅ Flask сервер работает!"
-
+# === Flask webhook ===
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
@@ -81,6 +69,10 @@ def webhook():
     except Exception as e:
         print(f"❌ Ошибка при обработке webhook: {e}")
     return "OK", 200
+
+@app.route("/")
+def index():
+    return "✅ Бот онлайн через webhook!"
 
 # === Установка webhook ===
 def setup_webhook():
