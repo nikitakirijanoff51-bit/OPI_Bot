@@ -5,14 +5,19 @@ import pandas as pd
 import threading
 import time
 
-# === Переменные окружения ===
+# === Настройки окружения ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
+
+# === Прокси для Telegram (важно!) ===
+telebot.apihelper.proxy = {
+    'https': 'socks5h://178.62.60.36:1080'  # публичный SOCKS5-прокси
+}
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# === Excel файл ===
+# === Excel-файл ===
 EXCEL_FILE = "data.xlsx"
 if not os.path.exists(EXCEL_FILE):
     df = pd.DataFrame(columns=["Месторождение", "#Скважины", "Статус выполнения", "Комментарий"])
@@ -21,14 +26,14 @@ if not os.path.exists(EXCEL_FILE):
 else:
     print("📗 Найден существующий файл data.xlsx")
 
-# === Обработчики команд ===
+# === Команды ===
 @bot.message_handler(commands=["start"])
 def start_handler(message):
     try:
         bot.send_message(
             message.chat.id,
             "👋 Привет! Я бот для учёта статусов скважин.\n\n"
-            "Доступные команды:\n"
+            "Команды:\n"
             "➕ /add месторождение скважина статус комментарий\n"
             "📋 /show — показать таблицу."
         )
@@ -43,7 +48,6 @@ def add_handler(message):
         if len(parts) < 5:
             bot.send_message(message.chat.id, "⚠️ Формат: /add месторождение скважина статус комментарий")
             return
-
         _, mest, well, status, comment = parts
         df = pd.read_excel(EXCEL_FILE)
         df.loc[len(df)] = [mest, well, status, comment]
@@ -51,8 +55,8 @@ def add_handler(message):
         bot.send_message(message.chat.id, "✅ Запись добавлена!")
         print(f"🟢 Добавлена запись: {mest}, {well}, {status}, {comment}")
     except Exception as e:
-        print(f"❌ Ошибка при /add: {e}")
         bot.send_message(message.chat.id, f"❌ Ошибка: {e}")
+        print(f"❌ Ошибка при /add: {e}")
 
 @bot.message_handler(commands=["show"])
 def show_handler(message):
@@ -71,8 +75,8 @@ def show_handler(message):
             )
         bot.send_message(message.chat.id, text[:4000])
     except Exception as e:
-        print(f"❌ Ошибка при /show: {e}")
         bot.send_message(message.chat.id, f"❌ Ошибка при чтении: {e}")
+        print(f"❌ Ошибка при /show: {e}")
 
 # === Flask webhook ===
 @app.route("/webhook", methods=["POST"])
@@ -80,7 +84,6 @@ def webhook():
     try:
         json_str = request.get_data(as_text=True)
         update = telebot.types.Update.de_json(json_str)
-        # Обрабатываем в отдельном потоке
         threading.Thread(target=bot.process_new_updates, args=([update],), daemon=True).start()
         print(f"📩 Обновление обработано: {update.message.text if update.message else 'нет message'}")
     except Exception as e:
@@ -99,7 +102,6 @@ def setup_webhook():
     success = bot.set_webhook(url=webhook_url)
     print(f"🔗 Webhook установлен: {success} ({webhook_url})")
 
-# === Запуск Flask ===
 if __name__ == "__main__":
     setup_webhook()
     port = int(os.getenv("PORT", 10000))
