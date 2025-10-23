@@ -3,12 +3,13 @@ import telebot
 from flask import Flask, request
 import pandas as pd
 import threading
+import time
 
 # === Переменные окружения ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
 
-bot = telebot.TeleBot(BOT_TOKEN, threaded=True)
+bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
 # === Excel файл ===
@@ -18,18 +19,22 @@ if not os.path.exists(EXCEL_FILE):
     df.to_excel(EXCEL_FILE, index=False)
     print("📘 Создан новый файл data.xlsx")
 else:
-    print("📗 Найден существующий Excel-файл.")
+    print("📗 Найден существующий файл data.xlsx")
 
-# === Команды ===
+# === Обработчики команд ===
 @bot.message_handler(commands=["start"])
 def start_handler(message):
-    bot.send_message(
-        message.chat.id,
-        "👋 Привет! Я бот для учёта статусов скважин.\n\n"
-        "Доступные команды:\n"
-        "➕ /add месторождение скважина статус комментарий\n"
-        "📋 /show — показать таблицу."
-    )
+    try:
+        bot.send_message(
+            message.chat.id,
+            "👋 Привет! Я бот для учёта статусов скважин.\n\n"
+            "Доступные команды:\n"
+            "➕ /add месторождение скважина статус комментарий\n"
+            "📋 /show — показать таблицу."
+        )
+        print(f"✅ Ответ отправлен пользователю {message.chat.id}")
+    except Exception as e:
+        print(f"❌ Ошибка при /start: {e}")
 
 @bot.message_handler(commands=["add"])
 def add_handler(message):
@@ -46,8 +51,8 @@ def add_handler(message):
         bot.send_message(message.chat.id, "✅ Запись добавлена!")
         print(f"🟢 Добавлена запись: {mest}, {well}, {status}, {comment}")
     except Exception as e:
+        print(f"❌ Ошибка при /add: {e}")
         bot.send_message(message.chat.id, f"❌ Ошибка: {e}")
-        print(f"❌ Ошибка при добавлении записи: {e}")
 
 @bot.message_handler(commands=["show"])
 def show_handler(message):
@@ -66,8 +71,8 @@ def show_handler(message):
             )
         bot.send_message(message.chat.id, text[:4000])
     except Exception as e:
+        print(f"❌ Ошибка при /show: {e}")
         bot.send_message(message.chat.id, f"❌ Ошибка при чтении: {e}")
-        print(f"❌ Ошибка при чтении Excel: {e}")
 
 # === Flask webhook ===
 @app.route("/webhook", methods=["POST"])
@@ -75,14 +80,12 @@ def webhook():
     try:
         json_str = request.get_data(as_text=True)
         update = telebot.types.Update.de_json(json_str)
-
-        # ⚡ Обрабатываем обновление асинхронно — не блокируем Telegram
+        # Обрабатываем в отдельном потоке
         threading.Thread(target=bot.process_new_updates, args=([update],), daemon=True).start()
-
         print(f"📩 Обновление обработано: {update.message.text if update.message else 'нет message'}")
     except Exception as e:
-        print(f"❌ Ошибка при обработке webhook: {e}")
-    return "OK", 200  # Возвращаем сразу, чтобы избежать таймаута
+        print(f"❌ Ошибка при webhook: {e}")
+    return "OK", 200
 
 @app.route("/")
 def index():
@@ -92,11 +95,13 @@ def index():
 def setup_webhook():
     webhook_url = f"{RENDER_EXTERNAL_URL}/webhook"
     bot.remove_webhook()
+    time.sleep(1)
     success = bot.set_webhook(url=webhook_url)
     print(f"🔗 Webhook установлен: {success} ({webhook_url})")
 
-# === Точка входа ===
+# === Запуск Flask ===
 if __name__ == "__main__":
     setup_webhook()
     port = int(os.getenv("PORT", 10000))
+    print(f"🚀 Flask запущен на порту {port}")
     app.run(host="0.0.0.0", port=port)
